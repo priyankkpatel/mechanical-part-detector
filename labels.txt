@@ -1,0 +1,4 @@
+0 Bolt
+1 Bearing
+2 Nut
+3 Gear

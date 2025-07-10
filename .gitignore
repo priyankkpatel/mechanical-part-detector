@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# Streamlit cache
+.streamlit/
+
+# OS
+.DS_Store
+
+# Model logs
+logs/
+checkpoints/
+
+# Optional: Ignore model weights if file size is too big
+# model.savedmodel/
