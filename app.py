@@ -4,7 +4,6 @@ import tensorflow as tf
 import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
-import keras
 import os
 
 # --------------------- Define Merged Class Labels ---------------------
@@ -13,7 +12,7 @@ CLASS_NAMES = ["Bolt", "Bearing", "Nut", "Gear"]  # Final displayed labels
 # --------------------- Load SavedModel ---------------------
 @st.cache_resource
 def load_model():
-    return keras.layers.TFSMLayer("model.savedmodel", call_endpoint="serving_default")
+    return tf.keras.models.load_model("model.savedmodel")
 
 # --------------------- Preprocess Uploaded Image ---------------------
 def preprocess_image(img: Image.Image):
@@ -40,7 +39,7 @@ def plot_predictions(preds):
     bars = ax.bar(CLASS_NAMES, merged_preds, color='steelblue', edgecolor='black')
     ax.set_ylim([0, 1])
     ax.set_ylabel("Confidence")
-    ax.set_title("🔍 Prediction Probabilities ", fontsize=14)
+    ax.set_title("🔍 Prediction Probabilities", fontsize=14)
     for i, value in enumerate(merged_preds):
         ax.text(i, value + 0.02, f"{value:.2f}", ha='center', fontsize=10)
     st.pyplot(fig)
@@ -64,8 +63,8 @@ if uploaded_file:
 
     model = load_model()
     input_tensor = preprocess_image(image)
-    predictions = model(input_tensor)
-    output_tensor = list(predictions.values())[0]  # Get softmax vector (shape: 1,5)
+    predictions = model(input_tensor, training=False)  # ensure inference mode
+    output_tensor = predictions.numpy()
 
     # Merge predictions
     bolt_score = output_tensor[0][0] + output_tensor[0][4]  # Bolt + Screw
@@ -82,7 +81,7 @@ if uploaded_file:
     st.success(f"### ✅ Predicted Part: **{predicted_class}**")
     st.info(f"🔢 Confidence: **{confidence * 100:.2f}%**")
 
-    plot_predictions(output_tensor.numpy())
+    plot_predictions(output_tensor)
 
 st.markdown("---")
 st.markdown("### 🧪 Try with Sample Images")
@@ -117,10 +116,7 @@ if os.path.exists(sample_dir):
                             mime="image/jpeg",
                             key=f"download-{filename}"
                         )
-        else:
-            st.warning("⚠️ No image files found in the 'samples' folder.")
     else:
-        st.error("❌ 'samples/' folder not found. Please create it and add images.")
-
+        st.warning("⚠️ No image files found in the 'samples' folder.")
 else:
     st.info("👆 Please upload an image to get started.")
