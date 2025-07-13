@@ -70,7 +70,7 @@ def plot_predictions(preds):
     for i, value in enumerate(merged_preds):
         ax.text(i, value + 0.02, f"{value:.2f}", ha='center', fontsize=10)
     st.pyplot(fig)
-
+    plt.close(fig) 
 # --------------------- Streamlit UI ---------------------
 st.set_page_config("🛠️ Mechanical Part Identifier", layout="centered")
 st.title("🛠️ Mechanical Part Identifier")
