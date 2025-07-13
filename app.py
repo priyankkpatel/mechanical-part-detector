@@ -5,14 +5,18 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 import os
+from keras.layers import TFSMLayer
+from keras import Sequential
 
 # --------------------- Define Merged Class Labels ---------------------
-CLASS_NAMES = ["Bolt", "Bearing", "Nut", "Gear"]  # Final displayed labels
+CLASS_NAMES = ["Bolt", "Bearing", "Nut", "Gear"]
 
-# --------------------- Load SavedModel ---------------------
+# --------------------- Load SavedModel with TFSMLayer ---------------------
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model("model.savedmodel")
+    layer = TFSMLayer("model.savedmodel", call_endpoint="serving_default")
+    model = Sequential([layer])
+    return model
 
 # --------------------- Preprocess Uploaded Image ---------------------
 def preprocess_image(img: Image.Image):
@@ -24,7 +28,7 @@ def preprocess_image(img: Image.Image):
 
 # --------------------- Plot Prediction Probabilities ---------------------
 def plot_predictions(preds):
-    preds = preds[0]  # shape: (5,) for 5 original classes
+    preds = preds[0]
 
     # Merge Bolt (index 0) + Screw (index 4)
     bolt_score = preds[0] + preds[4]
@@ -34,7 +38,6 @@ def plot_predictions(preds):
 
     merged_preds = [bolt_score, bearing_score, nut_score, gear_score]
 
-    # Plot
     fig, ax = plt.subplots(figsize=(6, 4))
     bars = ax.bar(CLASS_NAMES, merged_preds, color='steelblue', edgecolor='black')
     ax.set_ylim([0, 1])
@@ -53,21 +56,27 @@ st.markdown(
 )
 st.markdown("---")
 
-# Upload image section
 uploaded_file = st.file_uploader("📷 Upload Image (JPG/PNG)", type=["jpg", "jpeg", "png"])
 
 if uploaded_file:
     image = Image.open(uploaded_file)
     st.markdown("### 📸 Uploaded Image")
-    st.image(image, width=300, caption="Preview", use_column_width=False)
+    st.image(image, width=300, caption="Preview", use_container_width=False)
 
     model = load_model()
     input_tensor = preprocess_image(image)
-    predictions = model(input_tensor, training=False)  # ensure inference mode
-    output_tensor = predictions.numpy()
+    predictions = model(input_tensor, training=False)
+
+    # ✅ Fix: Safely handle dictionary outputs from TFSMLayer
+    if isinstance(predictions, dict):
+        output_tensor = list(predictions.values())[0]
+    else:
+        output_tensor = predictions
+
+    output_tensor = output_tensor.numpy()
 
     # Merge predictions
-    bolt_score = output_tensor[0][0] + output_tensor[0][4]  # Bolt + Screw
+    bolt_score = output_tensor[0][0] + output_tensor[0][4]
     bearing_score = output_tensor[0][1]
     nut_score = output_tensor[0][2]
     gear_score = output_tensor[0][3]
@@ -107,7 +116,7 @@ if os.path.exists(sample_dir):
                 label = os.path.splitext(filename)[0].replace("_", " ").capitalize()
 
                 with cols[i]:
-                    st.image(filepath, caption=label, width=150)
+                    st.image(filepath, caption=label, width=150, use_container_width=False)
                     with open(filepath, "rb") as file:
                         st.download_button(
                             label="⬇ Download",
