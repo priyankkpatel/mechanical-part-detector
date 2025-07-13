@@ -1,9 +1,6 @@
-streamlit>=1.25.0
-tensorflow-cpu
+streamlit
+tensorflow==2.11.0
 numpy
-pandas
-opencv-python
-Pillow
+pillow
 matplotlib
-scikit-learn
-rich
+fpdf
