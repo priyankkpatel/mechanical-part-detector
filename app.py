@@ -5,8 +5,6 @@ import numpy as np
 from PIL import Image
 import matplotlib.pyplot as plt
 import os
-from keras.layers import TFSMLayer
-from keras import Sequential
 
 # --------------------- Define Labels and Info ---------------------
 CLASS_NAMES = ["Bolt", "Bearing", "Nut", "Gear"]
@@ -21,8 +19,18 @@ PART_INFO = {
 # --------------------- Load Model ---------------------
 @st.cache_resource
 def load_model():
-    layer = TFSMLayer("model.savedmodel", call_endpoint="serving_default")
-    return Sequential([layer])
+    try:
+        # Option 1: Load SavedModel directly (recommended)
+        model = tf.keras.models.load_model("model.savedmodel")
+        return model
+    except Exception as e1:
+        try:
+            # Option 2: Load as SavedModel with tf.saved_model
+            model = tf.saved_model.load("model.savedmodel")
+            return model
+        except Exception as e2:
+            st.error(f"Failed to load model: {e1}, {e2}")
+            return None
 
 # --------------------- Preprocess Image ---------------------
 def preprocess_image(img: Image.Image):
@@ -32,16 +40,49 @@ def preprocess_image(img: Image.Image):
     img = np.expand_dims(img, axis=0)
     return img.astype(np.float32)
 
+# --------------------- Make Prediction ---------------------
+def make_prediction(model, input_tensor):
+    """Handle prediction for both Keras model and SavedModel"""
+    try:
+        # Try Keras model predict method
+        predictions = model.predict(input_tensor, verbose=0)
+        return predictions
+    except AttributeError:
+        # Handle SavedModel loaded with tf.saved_model.load
+        try:
+            # Try different signature keys
+            infer = model.signatures["serving_default"]
+            predictions = infer(tf.constant(input_tensor))
+            # Extract the output (might be in different formats)
+            if isinstance(predictions, dict):
+                predictions = list(predictions.values())[0]
+            return predictions.numpy()
+        except Exception as e:
+            st.error(f"Prediction failed: {e}")
+            return None
+
 # --------------------- Top 3 Predictions Table ---------------------
 def show_top_predictions(preds):
-    preds = preds[0]
-    bolt_score = preds[0] + preds[4]
-    scores = {
-        "Bolt": bolt_score,
-        "Bearing": preds[1],
-        "Nut": preds[2],
-        "Gear": preds[3]
-    }
+    if preds is None:
+        return
+    
+    # Handle different prediction formats
+    if len(preds.shape) > 1:
+        preds = preds[0]
+    
+    # Check if we have 5 classes (including the extra bolt class)
+    if len(preds) == 5:
+        bolt_score = preds[0] + preds[4]
+        scores = {
+            "Bolt": bolt_score,
+            "Bearing": preds[1],
+            "Nut": preds[2],
+            "Gear": preds[3]
+        }
+    else:
+        # Handle 4 classes directly
+        scores = {name: score for name, score in zip(CLASS_NAMES, preds)}
+    
     sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     st.markdown("### 🧠 Top 3 Predictions")
     st.table({label: f"{score*100:.2f}%" for label, score in sorted_scores[:3]})
@@ -55,12 +96,23 @@ def show_part_info(part_name):
 
 # --------------------- Plot Probabilities ---------------------
 def plot_predictions(preds):
-    preds = preds[0]
-    bolt_score = preds[0] + preds[4]
-    bearing_score = preds[1]
-    nut_score = preds[2]
-    gear_score = preds[3]
-    merged_preds = [bolt_score, bearing_score, nut_score, gear_score]
+    if preds is None:
+        return
+        
+    # Handle different prediction formats
+    if len(preds.shape) > 1:
+        preds = preds[0]
+    
+    # Check if we have 5 classes (including the extra bolt class)
+    if len(preds) == 5:
+        bolt_score = preds[0] + preds[4]
+        bearing_score = preds[1]
+        nut_score = preds[2]
+        gear_score = preds[3]
+        merged_preds = [bolt_score, bearing_score, nut_score, gear_score]
+    else:
+        # Handle 4 classes directly
+        merged_preds = list(preds)
 
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.bar(CLASS_NAMES, merged_preds, color='teal', edgecolor='black')
@@ -78,6 +130,10 @@ st.markdown("<p style='text-align:center;'>Upload or capture an image to identif
 st.markdown("---")
 
 model = load_model()
+
+if model is None:
+    st.error("❌ Failed to load the model. Please check if 'model.savedmodel' exists.")
+    st.stop()
 
 # --------------------- Camera or Upload Input ---------------------
 image = None
@@ -97,41 +153,48 @@ if image:
     st.markdown("### 📸 Image Preview")
     st.image(image, width=300, caption="Preview", use_container_width=False)
 
-    input_tensor = preprocess_image(image)
-    predictions = model(input_tensor, training=False)
+    with st.spinner("🔍 Analyzing image..."):
+        input_tensor = preprocess_image(image)
+        predictions = make_prediction(model, input_tensor)
 
-    if isinstance(predictions, dict):
-        output_tensor = list(predictions.values())[0]
+    if predictions is not None:
+        # Handle different prediction formats
+        if len(predictions.shape) > 1:
+            preds = predictions[0]
+        else:
+            preds = predictions
+
+        # Merge predictions if we have 5 classes
+        if len(preds) == 5:
+            bolt_score = preds[0] + preds[4]
+            bearing_score = preds[1]
+            nut_score = preds[2]
+            gear_score = preds[3]
+            merged_logits = np.array([bolt_score, bearing_score, nut_score, gear_score])
+        else:
+            merged_logits = preds
+
+        predicted_index = np.argmax(merged_logits)
+        predicted_class = CLASS_NAMES[predicted_index]
+        confidence = float(merged_logits[predicted_index])
+
+        st.markdown("---")
+        st.success(f"✅ Predicted Part: **{predicted_class}**")
+        st.info(f"🔢 Confidence: **{confidence * 100:.2f}%**")
+
+        show_top_predictions(predictions)
+        plot_predictions(predictions)
+        show_part_info(predicted_class)
+
+        # Store prediction history in session
+        if "history" not in st.session_state:
+            st.session_state.history = []
+        st.session_state.history.append({
+            "class": predicted_class,
+            "confidence": f"{confidence*100:.2f}%"
+        })
     else:
-        output_tensor = predictions
-    output_tensor = output_tensor.numpy()
-
-    # Merge predictions
-    bolt_score = output_tensor[0][0] + output_tensor[0][4]
-    bearing_score = output_tensor[0][1]
-    nut_score = output_tensor[0][2]
-    gear_score = output_tensor[0][3]
-
-    merged_logits = tf.stack([bolt_score, bearing_score, nut_score, gear_score])
-    predicted_index = tf.argmax(merged_logits).numpy()
-    predicted_class = CLASS_NAMES[predicted_index]
-    confidence = float(merged_logits[predicted_index])
-
-    st.markdown("---")
-    st.success(f"✅ Predicted Part: **{predicted_class}**")
-    st.info(f"🔢 Confidence: **{confidence * 100:.2f}%**")
-
-    show_top_predictions(output_tensor)
-    plot_predictions(output_tensor)
-    show_part_info(predicted_class)
-
-    # Store prediction history in session
-    if "history" not in st.session_state:
-        st.session_state.history = []
-    st.session_state.history.append({
-        "class": predicted_class,
-        "confidence": f"{confidence*100:.2f}%"
-    })
+        st.error("❌ Failed to make prediction. Please try again.")
 
 # --------------------- Prediction History ---------------------
 if "history" in st.session_state and st.session_state.history:
